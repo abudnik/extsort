@@ -1,0 +1,7 @@
+== External sorting demo ==
+
+1. Generate unsorted file of bigints: python gen.py
+2. Compile sort.cpp: g++ -02 sort.cpp -o extsort
+3. Sort file using extsort: ./extsort
+
+gen.py -> input.txt > extsort -> output.txt
