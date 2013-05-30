@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <cstring>
 #include <stdint.h>
 #include <vector>
 #include <algorithm>
@@ -20,23 +21,12 @@ struct CompareRefs
     CompareRefs(const char *buf) : buffer(buf) {}
 
     // a < b
-    bool operator() (const BufferRef &a, const BufferRef &b)
+    bool operator() (const BufferRef &a, const BufferRef &b) const
     {
         if (a.length != b.length)
             return a.length < b.length;
 
-        for( int i = 0; i < a.length; ++i )
-        {
-            char c1 = buffer[a.offset + i];
-            char c2 = buffer[b.offset + i];
-
-            if ( c1 == c2 )
-                continue;
-
-            return c1 < c2;
-        }
-
-        return false;
+        return strncmp(buffer + a.offset, buffer + b.offset, a.length) < 0;
     }
 
 private:
@@ -51,6 +41,12 @@ public:
     }
 
     void Sort()
+    {
+        MergeChunks( SortChunks() );
+    }
+
+private:
+    int SortChunks()
     {
         uint64_t file_offset = 0;
         uint64_t tail_reminder;
@@ -74,7 +70,11 @@ public:
 
             ++chunk;
         }
+
+        return chunk;
     }
+
+    virtual void MergeChunks( int chunk ) = 0;
 
     uint64_t ParseChunk()
     {
@@ -104,7 +104,7 @@ public:
         std::sort( refs.begin(), refs.end(), cmp );
     }
     
-    void SaveSortedChunk( int chunk )
+    void SaveSortedChunk( int chunk ) const
     {
         ostringstream ss;
         ss << "chunk/" << chunk;
@@ -124,6 +124,70 @@ protected:
     vector<BufferRef> refs;
 };
 
+class MultiPhaseMergeSorter : public Sorter
+{
+    struct MergeBuffer
+    {
+        char *buffer;
+        vector<BufferRef> refs;
+        int current;
+    };
+
+public:
+    MultiPhaseMergeSorter( istream &is_, ostream &os_, char *buffer_ )
+    : Sorter( is_, os_, buffer_ ) {}
+
+private:
+    virtual void MergeChunks( int chunk )
+    {
+        num_buffers = chunk;
+        AllocMergeBuffers();
+
+        bool sorted = false;
+        while( !sorted )
+        {
+            FillEmptyBuffers();
+
+            sorted = true;
+        }
+
+        FreeMergeBuffers();
+    }
+
+    void FillEmptyBuffers()
+    {
+        for( int i = 0; i < num_buffers; ++i )
+        {
+            if ( buffers[i].current >= buffers[i].refs.size() )
+            {
+                
+            }
+        }
+    }
+
+    void AllocMergeBuffers()
+    {
+        // use merge buffers on top of buffer
+        buffers = new MergeBuffer[num_buffers];
+        int buffer_size = BLOCK_SIZE / num_buffers;
+
+        for( int i = 0; i < num_buffers; ++i )
+        {
+            buffers[i].buffer = Sorter::buffer + i * buffer_size;
+            buffers[i].current = 0;
+        }
+    }
+
+    void FreeMergeBuffers()
+    {
+        delete[] buffers;
+    }
+
+private:
+    MergeBuffer *buffers; // small buffer for each chunk
+    int num_buffers;
+};
+
 
 int main()
 {
@@ -139,7 +203,7 @@ int main()
     ifstream input( "input.txt" );
     ofstream output( "output.txt" );
 
-    Sorter sorter( input, output, buffer );
+    MultiPhaseMergeSorter sorter( input, output, buffer );
     sorter.Sort();
 
     delete[] buffer;
