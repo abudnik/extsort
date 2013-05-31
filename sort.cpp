@@ -9,7 +9,7 @@
 using namespace std;
 
 static const int BLOCK_SIZE = 256 * 1024 * 1024; // 256 Mb
-static const int OUTPUT_BUFFER_SIZE = 16 * 1024 * 1024; // 16 Mb
+static const int OUTPUT_BUFFER_SIZE = 32 * 1024 * 1024; // 32 Mb
 
 struct ChunkRef
 {
@@ -37,20 +37,19 @@ private:
 class Sorter
 {
 public:
-    Sorter( istream &is_, ostream &os_, char *buffer_ ) : is(is_), os(os_), buffer(buffer_)
-    {
-    }
+    Sorter( istream &is_, ostream &os_, char *buffer_ ) : is(is_), os(os_), buffer(buffer_) {}
 
     void Sort()
     {
-        MergeChunks( /*SortChunks()*/16 );
+        int chunk = SortChunks();
+        MergeChunks( chunk );
     }
 
 private:
     int SortChunks()
     {
         uint64_t file_offset = 0;
-        uint64_t tail_reminder;
+        int tail_reminder;
         int chunk = 0;
 
         while( is.good() )
@@ -77,7 +76,7 @@ private:
 
     virtual void MergeChunks( int chunk ) = 0;
 
-    uint64_t ParseChunk()
+    int ParseChunk()
     {
         int i, offset;
         ChunkRef ref;
@@ -96,7 +95,14 @@ private:
             }
         }
 
-        return (uint64_t)(BLOCK_SIZE - i);
+        // get uncomplete number length in buffer (reminder)
+        if ( buffer[BLOCK_SIZE - 1] != '\n' )
+        {
+            i = refs.back().offset + refs.back().length + 1;
+            return BLOCK_SIZE - i;
+        }
+
+        return 0;
     }
 
     void SortRefs()
@@ -111,7 +117,7 @@ private:
         ss << "chunk/" << chunk;
         ofstream o( ss.str().c_str() );
 
-        for( int i = 0; i < refs.size(); ++i )
+        for( unsigned int i = 0; i < refs.size(); ++i )
         {
             o.write( buffer + refs[i].offset, refs[i].length );
             o << endl;
@@ -139,8 +145,8 @@ class MultiPhaseMergeSorter : public Sorter
         char *buffer;
         vector<BufferRef> refs;
         int current_ref;
-        int file_offset;
-        bool skipme;
+        uint64_t file_offset;
+        bool skip;
     };
 
 public:
@@ -182,7 +188,7 @@ private:
 
         for( int i = 0; i < num_buffers; ++i )
         {
-            if ( !buffers[i].skipme )
+            if ( !buffers[i].skip )
             {
                 min = buffers[i].refs[ buffers[i].current_ref ];
                 found_first = true;
@@ -193,9 +199,9 @@ private:
         if ( !found_first )
             return false;
 
-        for( int i = 0; i < num_buffers; ++i )
+        for( int i = last_min; i < num_buffers; ++i )
         {
-            if ( !buffers[i].skipme )
+            if ( !buffers[i].skip )
             {
                 if ( CmpLess( buffers[i].refs[ buffers[i].current_ref ], min ) )
                 {
@@ -218,7 +224,7 @@ private:
         return strncmp(a.buffer + a.offset, b.buffer + b.offset, a.length) < 0;
     }
 
-    void PushToOutput( BufferRef &min )
+    void PushToOutput( const BufferRef &min )
     {
         if ( output_offset + min.length + 1 >= OUTPUT_BUFFER_SIZE )
         {
@@ -236,11 +242,11 @@ private:
     {
         for( int i = 0; i < num_buffers; ++i )
         {
-            if ( buffers[i].current_ref >= buffers[i].refs.size() && !buffers[i].skipme ) // check if buffer is empty
+            if ( buffers[i].current_ref >= buffers[i].refs.size() && !buffers[i].skip ) // check if buffer is empty
             {
                 if ( buffers[i].file_offset >= BLOCK_SIZE ) // chunk were parsed already
                 {
-                    buffers[i].skipme = true;
+                    buffers[i].skip = true;
                     continue;
                 }
 
@@ -254,17 +260,18 @@ private:
                 int tail_reminder = ParseBuffer( buffers[i] );
                 buffers[i].file_offset += buffer_size - tail_reminder;
 
-                cout << " : " << i << endl;
+                cout << "read buffer of chunk = " << i << endl;
             }
         }
     }
 
-    int ParseBuffer( MergeBuffer &b )
+    int ParseBuffer( MergeBuffer &b ) const
     {
         int i, offset;
         BufferRef ref;
 
         b.refs.clear();
+        b.current_ref = 0;
 
         offset = 0;
         for( i = 0; i < buffer_size; ++i )
@@ -279,7 +286,13 @@ private:
             }
         }
 
-        return buffer_size - i;
+        if ( b.buffer[buffer_size - 1] != '\n' )
+        {
+            i = b.refs.back().offset + b.refs.back().length + 1;
+            return buffer_size - i;
+        }
+
+        return 0;
     }
 
     void AllocMergeBuffers()
@@ -293,7 +306,7 @@ private:
             buffers[i].buffer = Sorter::buffer + i * buffer_size;
             buffers[i].current_ref = 0;
             buffers[i].file_offset = 0;
-            buffers[i].skipme = false;
+            buffers[i].skip = false;
         }
     }
 
