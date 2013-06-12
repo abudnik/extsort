@@ -15,6 +15,7 @@ def main():
     i = 0
     while True:
         if ( i > 10000 ):
+            i = 0
             if CheckFileSize() == True:
                 break
         i += 1
