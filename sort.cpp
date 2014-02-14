@@ -146,16 +146,14 @@ class MultiPhaseMergeSorter : public Sorter
         vector<BufferRef> refs;
         int current_ref;
         uint64_t file_offset;
-        bool skip;
     };
 
 public:
     MultiPhaseMergeSorter( istream &is_, ostream &os_, char *buffer_ )
-    : Sorter( is_, os_, buffer_ )
-    {
-        output_buffer = new char[ OUTPUT_BUFFER_SIZE ];
-        output_offset = 0;
-    }
+    : Sorter( is_, os_, buffer_ ),
+     output_buffer( new char[ OUTPUT_BUFFER_SIZE ] ),
+     output_offset( 0 )
+    {}
 
     ~MultiPhaseMergeSorter()
     {
@@ -166,7 +164,7 @@ private:
     virtual void MergeChunks( int chunk )
     {
         num_buffers = chunk;
-        AllocMergeBuffers();
+        InitMergeBuffers();
 
         BufferRef min;
         int buffer;
@@ -174,45 +172,26 @@ private:
         for( int i = 0; i < chunk; ++i )
             FillEmptyBuffer( i );
 
-        while( 1 )
+        while( buffers.size() )
         {
             buffer = FindMinimumValue( min );
-            if ( buffer < 0 )
-                break;
             FillEmptyBuffer( buffer );
             PushToOutput( min );
         }
-
-        FreeMergeBuffers();
     }
 
     int FindMinimumValue( BufferRef &min )
     {
-        bool found_first = false;
-        int last_min;
+        int last_min = 0;
 
-        for( int i = 0; i < num_buffers; ++i )
+        min = buffers[0].refs[ buffers[0].current_ref ];
+
+        for( int i = 1; i < buffers.size(); ++i )
         {
-            if ( !buffers[i].skip )
+            if ( CmpLess( buffers[i].refs[ buffers[i].current_ref ], min ) )
             {
                 min = buffers[i].refs[ buffers[i].current_ref ];
-                found_first = true;
                 last_min = i;
-                break;
-            }
-        }
-        if ( !found_first )
-            return -1;
-
-        for( int i = last_min; i < num_buffers; ++i )
-        {
-            if ( !buffers[i].skip )
-            {
-                if ( CmpLess( buffers[i].refs[ buffers[i].current_ref ], min ) )
-                {
-                    min = buffers[i].refs[ buffers[i].current_ref ];
-                    last_min = i;
-                }
             }
         }
 
@@ -246,11 +225,11 @@ private:
     void FillEmptyBuffer( int buffer )
     {
         const int i = buffer;
-        if ( buffers[i].current_ref >= buffers[i].refs.size() && !buffers[i].skip ) // check if buffer is empty
+        if ( buffers[i].current_ref >= buffers[i].refs.size() ) // check if buffer is empty
         {
             if ( buffers[i].file_offset >= BLOCK_SIZE ) // chunk were parsed already
             {
-                buffers[i].skip = true;
+                buffers.erase( buffers.begin() + i );
                 return;
             }
 
@@ -298,10 +277,10 @@ private:
         return 0;
     }
 
-    void AllocMergeBuffers()
+    void InitMergeBuffers()
     {
         // use merge buffers on top of buffer
-        buffers = new MergeBuffer[num_buffers];
+        buffers.resize( num_buffers );
         buffer_size = BLOCK_SIZE / num_buffers;
 
         for( int i = 0; i < num_buffers; ++i )
@@ -309,17 +288,11 @@ private:
             buffers[i].buffer = Sorter::buffer + i * buffer_size;
             buffers[i].current_ref = 0;
             buffers[i].file_offset = 0;
-            buffers[i].skip = false;
         }
     }
 
-    void FreeMergeBuffers()
-    {
-        delete[] buffers;
-    }
-
 private:
-    MergeBuffer *buffers; // small buffer for each chunk
+    std::vector< MergeBuffer > buffers; // small buffers for each chunk
     int num_buffers;
     int buffer_size;
     char *output_buffer;
