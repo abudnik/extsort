@@ -169,19 +169,24 @@ private:
         AllocMergeBuffers();
 
         BufferRef min;
+        int buffer;
+
+        for( int i = 0; i < chunk; ++i )
+            FillEmptyBuffer( i );
 
         while( 1 )
         {
-            FillEmptyBuffers();
-            if ( !FindMinimumValue( min ) )
+            buffer = FindMinimumValue( min );
+            if ( buffer < 0 )
                 break;
+            FillEmptyBuffer( buffer );
             PushToOutput( min );
         }
 
         FreeMergeBuffers();
     }
 
-    bool FindMinimumValue( BufferRef &min )
+    int FindMinimumValue( BufferRef &min )
     {
         bool found_first = false;
         int last_min;
@@ -197,7 +202,7 @@ private:
             }
         }
         if ( !found_first )
-            return false;
+            return -1;
 
         for( int i = last_min; i < num_buffers; ++i )
         {
@@ -212,7 +217,7 @@ private:
         }
 
         ++buffers[ last_min ].current_ref;
-        return true;
+        return last_min;
     }
 
     // a < b
@@ -238,30 +243,28 @@ private:
         output_offset += min.length + 1;
     }
 
-    void FillEmptyBuffers()
+    void FillEmptyBuffer( int buffer )
     {
-        for( int i = 0; i < num_buffers; ++i )
+        const int i = buffer;
+        if ( buffers[i].current_ref >= buffers[i].refs.size() && !buffers[i].skip ) // check if buffer is empty
         {
-            if ( buffers[i].current_ref >= buffers[i].refs.size() && !buffers[i].skip ) // check if buffer is empty
+            if ( buffers[i].file_offset >= BLOCK_SIZE ) // chunk were parsed already
             {
-                if ( buffers[i].file_offset >= BLOCK_SIZE ) // chunk were parsed already
-                {
-                    buffers[i].skip = true;
-                    continue;
-                }
-
-                ostringstream ss;
-                ss << "chunk/" << i;
-                ifstream is( ss.str().c_str() );
-
-                is.seekg( buffers[i].file_offset, is.beg );
-                is.read( buffers[i].buffer, buffer_size );
-
-                int tail_reminder = ParseBuffer( buffers[i] );
-                buffers[i].file_offset += buffer_size - tail_reminder;
-
-                cout << "read buffer of chunk = " << i << endl;
+                buffers[i].skip = true;
+                return;
             }
+
+            ostringstream ss;
+            ss << "chunk/" << i;
+            ifstream is( ss.str().c_str() );
+
+            is.seekg( buffers[i].file_offset, is.beg );
+            is.read( buffers[i].buffer, buffer_size );
+
+            int tail_reminder = ParseBuffer( buffers[i] );
+            buffers[i].file_offset += buffer_size - tail_reminder;
+
+            cout << "read buffer of chunk = " << i << endl;
         }
     }
 
