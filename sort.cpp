@@ -1,7 +1,12 @@
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <fcntl.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <cerrno>
 #include <stdint.h>
 #include <vector>
 #include <algorithm>
@@ -47,6 +52,7 @@ public:
 
     void Sort()
     {
+        PrepareWriteVector();
         int chunk = SortChunks();
         merger_->MergeChunks( chunk );
     }
@@ -114,17 +120,46 @@ private:
         std::sort( refs_.begin(), refs_.end(), CompareRefs() );
     }
     
-    void SaveSortedChunk( int chunk ) const
+    void SaveSortedChunk( int chunk )
     {
         ostringstream ss;
         ss << "chunk/" << chunk;
-        ofstream o( ss.str().c_str() );
+        int o = open( ss.str().c_str(), O_CREAT | O_APPEND );
+        if ( o == -1 )
+        {
+            cout << "open(" << ss.str().c_str() << ") failed: " << strerror( errno ) << endl;
+            return;
+        }
 
+        size_t vIndex = 0;
         for( size_t i = 0; i < refs_.size(); ++i )
         {
-            o.write( refs_[i].data, refs_[i].length );
-            o << endl;
+            if ( vIndex < iovec_.size() )
+            {
+                iovec_[ vIndex ].iov_base = refs_[i].data;
+                iovec_[ vIndex ].iov_len = refs_[i].length;
+                ++vIndex;
+            }
+            else
+            {
+                vIndex = 0;
+                writev( o, &iovec_[0], iovec_.size() );
+            }
         }
+
+        if ( vIndex )
+            writev( o, &iovec_[0], vIndex );
+    }
+
+    void PrepareWriteVector()
+    {
+        long iovMax = sysconf( _SC_IOV_MAX );
+        if ( iovMax == -1 )
+        {
+            cout << "sysconf( _SC_IOV_MAX ) failed: " << strerror( errno ) << endl;
+            return;
+        }
+        iovec_.resize( iovMax );
     }
 
 protected:
@@ -132,6 +167,7 @@ protected:
     char *buffer_;
     Merger *merger_;
     vector< ChunkRef > refs_;
+    vector< iovec > iovec_;
 };
 
 class MultiPhaseMerger : public Merger
