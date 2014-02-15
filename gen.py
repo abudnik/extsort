@@ -4,10 +4,10 @@ import random
 
 def CheckFileSize():
     s = os.stat("input.txt")
-    return s.st_size >= 4 * 1024 * 1024 * 1024 # 4 Gb
+    return s.st_size >= 4 * 1024 * 1024 ** 2 # 4 Gb
 
 def RandBigInt():
-    return random.randrange(0, 10000000000000000000000000000)
+    return random.randrange(0, 10 ** 24)
 
 def main():
     f = open("input.txt", "w")
